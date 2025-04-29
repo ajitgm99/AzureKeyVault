@@ -1,0 +1,123 @@
+To customize the console output to include only specific properties, you'll need to modify the Serilog configuration. Here's how to achieve the exact output format you want:
+
+1. Update appsettings.json (Console Sink Configuration)
+json
+{
+  "Serilog": {
+    "WriteTo": [
+      {
+        "Name": "Console",
+        "Args": {
+          "formatter": "Serilog.Formatting.Json.JsonFormatter, Serilog",
+          "restrictedToMinimumLevel": "Information",
+          "formatterOptions": {
+            "IncludeRenderedMessage": false,
+            "ExcludeProperties": ["RequestId", "RequestPath", "MachineName", "ThreadId"],
+            "WriteIndented": false
+          }
+        }
+      }
+    ]
+  }
+}
+2. Alternative: Custom Formatter Class
+Create a custom formatter in your Common.Logging project:
+
+csharp
+// CustomFormatter.cs
+using Serilog.Formatting;
+using Serilog.Formatting.Json;
+using System.IO;
+
+namespace Common.Logging.Formatters
+{
+    public class CustomCompactJsonFormatter : ITextFormatter
+    {
+        private readonly JsonValueFormatter _valueFormatter;
+
+        public CustomCompactJsonFormatter()
+        {
+            _valueFormatter = new JsonValueFormatter(typeTagName: "$type");
+        }
+
+        public void Format(LogEvent logEvent, TextWriter output)
+        {
+            output.Write("{\"@t\":\"");
+            output.Write(logEvent.Timestamp.UtcDateTime.ToString("o"));
+            output.Write("\",\"@m\":");
+            JsonValueFormatter.WriteQuotedJsonString(logEvent.MessageTemplate.Text, output);
+            output.Write(",\"@i\":\"");
+            output.Write(logEvent.GetEventId());
+            output.Write("\"");
+
+            // Add only specific properties
+            if (logEvent.Properties.TryGetValue("ClassName", out var className))
+            {
+                output.Write(",\"ClassName\":");
+                _valueFormatter.Format(className, output);
+            }
+
+            if (logEvent.Properties.TryGetValue("MethodName", out var methodName))
+            {
+                output.Write(",\"MethodName\":");
+                _valueFormatter.Format(methodName, output);
+            }
+
+            if (logEvent.Properties.TryGetValue("LineNumber", out var lineNumber))
+            {
+                output.Write(",\"LineNumber\":");
+                _valueFormatter.Format(lineNumber, output);
+            }
+
+            if (logEvent.Properties.TryGetValue("SourceContext", out var sourceContext))
+            {
+                output.Write(",\"SourceContext\":");
+                _valueFormatter.Format(sourceContext, output);
+            }
+
+            output.Write("}");
+            output.WriteLine();
+        }
+    }
+}
+3. Update Serilog Configuration to Use Custom Formatter
+csharp
+// In your Program.cs or SerilogConfig.cs
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console(new CustomCompactJsonFormatter())
+    // other configurations...
+    .CreateLogger();
+4. Alternative: Using Filtered Properties
+If you want to keep using the JSON formatter but filter properties:
+
+csharp
+// In your logger configuration
+.WriteTo.Console(new JsonFormatter(
+    omitEnclosingObject: true,
+    closingDelimiter: Environment.NewLine,
+    renderMessage: false,
+    formatProvider: null,
+    // Specify which properties to include
+    propertyFilter: prop => 
+        prop.Key == "@t" || 
+        prop.Key == "@m" || 
+        prop.Key == "@i" || 
+        prop.Key == "ClassName" || 
+        prop.Key == "MethodName" || 
+        prop.Key == "LineNumber" || 
+        prop.Key == "SourceContext"))
+Resulting Output
+This will produce exactly the format you requested:
+
+json
+{"@t":"2023-05-15T14:22:45.123456Z","@m":"Starting processing request","@i":"a1b2c3d4","ClassName":"SampleController","MethodName":"Get","LineNumber":25,"SourceContext":"WebApiProject.Controllers.SampleController"}
+Important Notes:
+The custom formatter approach gives you complete control over the output format
+
+The appsettings.json approach is simpler but slightly less flexible
+
+Make sure all the properties you want to include are actually being enriched in your log events
+
+For production use, consider caching the property lookups in the custom formatter for better performance
+
+Choose the approach that best fits your needs - the custom formatter is more maintainable if you need this specific format across multiple projects, while the configuration-based approach is quicker for simple cases.
