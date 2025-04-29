@@ -1,1 +1,308 @@
-testsb
+# Advanced Serilog Configuration for .NET 8 Class Library
+
+Here's a comprehensive implementation of a Serilog utility class library for .NET 8 that captures:
+- Class name
+- Method name
+- Line number
+- Timestamp
+- Custom method execution time
+- Exception details
+
+## 1. Install Required Packages
+
+First, add these NuGet packages to your class library project:
+- Serilog
+- Serilog.AspNetCore
+- Serilog.Sinks.Console
+- Serilog.Sinks.File
+- Serilog.Enrichers.Environment
+- Serilog.Exceptions
+- Serilog.Settings.Configuration
+
+## 2. Logger Configuration Utility
+
+```csharp
+using Serilog;
+using Serilog.Exceptions;
+using Serilog.Formatting.Json;
+using System.Diagnostics;
+
+namespace Common.Logging
+{
+    public static class LoggerConfigurationExtensions
+    {
+        public static IHostBuilder UseSerilogConfiguration(this IHostBuilder hostBuilder)
+        {
+            return hostBuilder.UseSerilog((context, services, configuration) =>
+            {
+                var appName = context.HostingEnvironment.ApplicationName;
+                var environment = context.HostingEnvironment.EnvironmentName;
+                
+                configuration
+                    .ReadFrom.Configuration(context.Configuration)
+                    .ReadFrom.Services(services)
+                    .Enrich.FromLogContext()
+                    .Enrich.WithMachineName()
+                    .Enrich.WithProperty("Application", appName)
+                    .Enrich.WithProperty("Environment", environment)
+                    .Enrich.WithExceptionDetails()
+                    .Enrich.WithDemystifiedStackTraces();
+                
+                ConfigureConsoleSink(configuration);
+                ConfigureFileSink(configuration, appName, environment);
+                
+                if (context.HostingEnvironment.IsDevelopment())
+                {
+                    configuration.WriteTo.Debug();
+                }
+            });
+        }
+
+        private static void ConfigureConsoleSink(LoggerConfiguration configuration)
+        {
+            configuration.WriteTo.Console(outputTemplate: 
+                "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} " +
+                "{NewLine}{Exception} " +
+                "{NewLine}Class: {SourceContext} " +
+                "{NewLine}Method: {MemberName} " +
+                "{NewLine}Line: {LineNumber}");
+        }
+
+        private static void ConfigureFileSink(LoggerConfiguration configuration, string appName, string environment)
+        {
+            configuration.WriteTo.File(
+                formatter: new JsonFormatter(),
+                path: $"logs/{appName}-{environment}-.log",
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7);
+        }
+    }
+}
+```
+
+## 3. Logging Helper with Method Execution Time Tracking
+
+```csharp
+using Serilog;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+
+namespace Common.Logging
+{
+    public interface ILoggingHelper
+    {
+        IDisposable TrackMethodTime([CallerMemberName] string memberName = "", [CallerFilePath] string sourceFilePath = "", [CallerLineNumber] int sourceLineNumber = 0);
+        void LogError(Exception ex, [CallerMemberName] string memberName = "", [CallerFilePath] string sourceFilePath = "", [CallerLineNumber] int sourceLineNumber = 0);
+    }
+
+    public class LoggingHelper : ILoggingHelper
+    {
+        private readonly ILogger _logger;
+        private readonly string _className;
+
+        public LoggingHelper(Type type)
+        {
+            _logger = Log.ForContext(type);
+            _className = type.Name;
+        }
+
+        public IDisposable TrackMethodTime([CallerMemberName] string memberName = "", 
+                                          [CallerFilePath] string sourceFilePath = "", 
+                                          [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            var sw = Stopwatch.StartNew();
+            
+            return new DisposableAction(() =>
+            {
+                sw.Stop();
+                _logger.Information(
+                    "Method {MethodName} from {ClassName} executed in {ElapsedMilliseconds}ms (Line: {LineNumber})",
+                    memberName, 
+                    _className, 
+                    sw.ElapsedMilliseconds,
+                    sourceLineNumber);
+            });
+        }
+
+        public void LogError(Exception ex, 
+                            [CallerMemberName] string memberName = "", 
+                            [CallerFilePath] string sourceFilePath = "", 
+                            [CallerLineNumber] int sourceLineNumber = 0)
+        {
+            _logger.Error(ex, 
+                "Error in {MethodName} from {ClassName} at line {LineNumber}. Error: {ErrorMessage}", 
+                memberName, 
+                _className, 
+                sourceLineNumber, 
+                ex.Message);
+        }
+
+        private class DisposableAction : IDisposable
+        {
+            private readonly Action _action;
+
+            public DisposableAction(Action action)
+            {
+                _action = action;
+            }
+
+            public void Dispose()
+            {
+                _action();
+            }
+        }
+    }
+}
+```
+
+## 4. Dependency Injection Extension
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Common.Logging
+{
+    public static class DependencyInjection
+    {
+        public static IServiceCollection AddCustomLogging(this IServiceCollection services)
+        {
+            // Register generic logging helper
+            services.AddTransient(typeof(ILoggingHelper<>), typeof(LoggingHelper<>));
+            
+            // Register non-generic version for cases where you don't have a type
+            services.AddTransient<ILoggingHelper>(provider => 
+                new LoggingHelper(typeof(LoggingHelper)));
+            
+            return services;
+        }
+    }
+
+    public interface ILoggingHelper<T> : ILoggingHelper { }
+
+    public class LoggingHelper<T> : LoggingHelper, ILoggingHelper<T>
+    {
+        public LoggingHelper() : base(typeof(T)) { }
+    }
+}
+```
+
+## 5. appsettings.json Configuration
+
+```json
+{
+  "Serilog": {
+    "Using": ["Serilog.Sinks.Console", "Serilog.Sinks.File"],
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "Microsoft.Hosting.Lifetime": "Information",
+        "System": "Warning"
+      }
+    },
+    "Enrich": ["FromLogContext", "WithMachineName", "WithExceptionDetails"],
+    "WriteTo": [
+      {
+        "Name": "Console",
+        "Args": {
+          "outputTemplate": "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj} {NewLine}{Exception} {NewLine}Class: {SourceContext} {NewLine}Method: {MemberName} {NewLine}Line: {LineNumber}"
+        }
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logs/webapi-.log",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 7,
+          "formatter": "Serilog.Formatting.Json.JsonFormatter, Serilog"
+        }
+      }
+    ]
+  }
+}
+```
+
+## 6. Usage in Web API
+
+### Program.cs Setup
+
+```csharp
+using Common.Logging;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Host.UseSerilogConfiguration();
+builder.Services.AddCustomLogging();
+
+// ... other services
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+app.UseSerilogRequestLogging();
+
+// ... other middleware
+```
+
+### Controller Usage Example
+
+```csharp
+using Common.Logging;
+using Microsoft.AspNetCore.Mvc;
+
+[ApiController]
+[Route("[controller]")]
+public class WeatherForecastController : ControllerBase
+{
+    private readonly ILoggingHelper<WeatherForecastController> _logger;
+    
+    public WeatherForecastController(ILoggingHelper<WeatherForecastController> logger)
+    {
+        _logger = logger;
+    }
+
+    [HttpGet]
+    public IActionResult Get()
+    {
+        using (_logger.TrackMethodTime())
+        {
+            try
+            {
+                // Your logic here
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex);
+                return StatusCode(500);
+            }
+        }
+    }
+}
+```
+
+## Key Features
+
+1. **Rich Context Information**:
+   - Captures class name, method name, and line number using caller attributes
+   - Includes timestamps and environment information
+
+2. **Performance Tracking**:
+   - Measures method execution time with `TrackMethodTime()`
+   - Uses `IDisposable` pattern for clean measurement
+
+3. **Error Handling**:
+   - Dedicated `LogError` method with full exception details
+   - Includes stack trace demystification
+
+4. **Flexible Configuration**:
+   - JSON configuration support
+   - Console and file sinks with different formats
+   - Environment-specific settings
+
+5. **Dependency Injection**:
+   - Both generic and non-generic versions available
+   - Easy integration with ASP.NET Core
+
+This implementation provides a comprehensive logging solution that meets all your requirements while being maintainable and extensible.
