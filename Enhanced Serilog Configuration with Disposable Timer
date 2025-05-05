@@ -1,7 +1,6 @@
-Enhanced Serilog Configuration with Disposable Timer
-I'll modify the solution to include a DisposableTimer class that measures and logs operation durations, while maintaining all the previous functionality (timestamp, process ID, request path, etc.). Here's the complete implementation:
+Here's the complete implementation with all files for both projects, including the disposable timer functionality:
 
-Updated Project Structure
+Complete Solution Structure
 Solution/
 ├── Common.Logging/
 │   ├── Enrichers/
@@ -10,19 +9,121 @@ Solution/
 │   ├── Extensions/
 │   │   ├── SerilogExtensions.cs
 │   ├── Utilities/
-│   │   ├── DisposableTimer.cs           # New
+│   │   ├── DisposableTimer.cs
 │   ├── SerilogConfig.cs
 │   ├── Common.Logging.csproj
 ├── WebApi/
+│   ├── Controllers/
+│   │   ├── TestController.cs
 │   ├── Program.cs
 │   ├── WebApi.csproj
-Implementation Updates
 1. Common.Logging (Class Library)
-Utilities/DisposableTimer.cs (new file):
+Common.Logging.csproj
+xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Serilog" Version="3.1.1" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="4.2.0" />
+  </ItemGroup>
+</Project>
+Enrichers/TimeTakenEnricher.cs
+csharp
+using Serilog.Core;
+using Serilog.Events;
+using System.Diagnostics;
 
+namespace Common.Logging.Enrichers;
+
+public class TimeTakenEnricher : ILogEventEnricher
+{
+    private readonly Stopwatch _stopwatch;
+
+    public TimeTakenEnricher()
+    {
+        _stopwatch = Stopwatch.StartNew();
+    }
+
+    public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
+    {
+        var elapsedMs = _stopwatch.ElapsedMilliseconds;
+        var property = propertyFactory.CreateProperty("TimeTakenMs", elapsedMs);
+        logEvent.AddPropertyIfAbsent(property);
+    }
+}
+Enrichers/RequestPathEnricher.cs
+csharp
+using Microsoft.AspNetCore.Http;
+using Serilog.Core;
+using Serilog.Events;
+using System.Security.Claims;
+
+namespace Common.Logging.Enrichers;
+
+public class RequestPathEnricher : ILogEventEnricher
+{
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public RequestPathEnricher(IHttpContextAccessor httpContextAccessor)
+    {
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
+    {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext == null) return;
+
+        var requestPath = httpContext.Request.Path;
+        logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("RequestPath", requestPath));
+
+        var endpoint = httpContext.GetEndpoint();
+        if (endpoint != null)
+        {
+            var actionDescriptor = endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>();
+            if (actionDescriptor != null)
+            {
+                logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("ActionPath", 
+                    $"{actionDescriptor.ControllerName}.{actionDescriptor.ActionName}"));
+            }
+        }
+    }
+}
+Extensions/SerilogExtensions.cs
+csharp
+using Common.Logging.Enrichers;
+using Serilog;
+
+namespace Common.Logging.Extensions;
+
+public static class SerilogExtensions
+{
+    public static LoggerConfiguration WithBasicEnrichers(this LoggerConfiguration config)
+    {
+        return config
+            .Enrich.WithProcessId()
+            .Enrich.WithMachineName()
+            .Enrich.With(new TimeTakenEnricher());
+    }
+
+    public static LoggerConfiguration WithWebApiEnrichers(this LoggerConfiguration config)
+    {
+        return config
+            .WithBasicEnrichers()
+            .Enrich.FromLogContext()
+            .Enrich.With<RequestPathEnricher>();
+    }
+}
+Utilities/DisposableTimer.cs
 csharp
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using Microsoft.Extensions.Logging;
 
 namespace Common.Logging.Utilities;
@@ -46,10 +147,10 @@ public class DisposableTimer : IDisposable
         _logLevel = logLevel;
         _stopwatch = Stopwatch.StartNew();
         
-        // Create a logging scope with additional properties
-        _scope = _logger.BeginScope(properties.ToDictionary(
-            x => x.key,
-            x => x.value));
+        _scope = _logger.BeginScope(
+            properties.ToDictionary(
+                x => x.key,
+                x => x.value));
     }
 
     public void Dispose()
@@ -76,12 +177,10 @@ public static class DisposableTimerExtensions
         return new DisposableTimer(logger, operationName, logLevel, properties);
     }
 }
-SerilogConfig.cs (updated to include timer):
-
+SerilogConfig.cs
 csharp
 using Common.Logging.Extensions;
 using Serilog;
-using Serilog.Formatting;
 
 namespace Common.Logging;
 
@@ -110,9 +209,49 @@ public static class SerilogConfig
         });
     }
 }
-2. WebApi Project Updates
-Controllers/TestController.cs (example usage):
+2. WebApi Project
+WebApi.csproj
+xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Common.Logging\Common.Logging.csproj" />
+  </ItemGroup>
+</Project>
+Program.cs
+csharp
+using Common.Logging;
 
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Host.UseSerilogConfiguration();
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
+Controllers/TestController.cs
 csharp
 using Common.Logging.Utilities;
 using Microsoft.AspNetCore.Mvc;
@@ -138,62 +277,60 @@ public class TestController : ControllerBase
                properties: ("RequestId", Guid.NewGuid())))
         {
             // Simulate work
-            Thread.Sleep(100);
+            Thread.Sleep(new Random().Next(50, 200));
             
-            return Ok("Hello World");
+            return Ok(new { Message = "Hello World", Timestamp = DateTime.UtcNow });
+        }
+    }
+
+    [HttpGet("long")]
+    public IActionResult GetLongRunning()
+    {
+        using (_logger.TimeOperation("LongRunningOperation", LogLevel.Warning,
+               ("RequestId", Guid.NewGuid()),
+               ("User", User.Identity?.Name ?? "anonymous")))
+        {
+            Thread.Sleep(1000);
+            return Ok(new { Message = "Long operation completed" });
         }
     }
 }
-Expected Output
-When you hit the /test endpoint, you'll see logs like:
-
-2024-05-15 15:30:45 [12345] [/test] [Test.Get] Operation TestController.Get completed in 102ms
-Key Features
-DisposableTimer:
-
-Automatically measures and logs operation duration
-
-Supports custom log levels
-
-Includes operation name in logs
-
-Implements proper disposal pattern
-
-Supports logging scopes with additional properties
-
-Extension Method:
-
-Clean syntax for starting timers (logger.TimeOperation())
-
-Optional parameters for log level and additional properties
-
-Integration:
-
-Works with existing enrichers (timestamp, process ID, request path)
-
-Maintains clean separation between infrastructure and application code
-
-Usage Examples
-Basic usage:
+How to Use
+Basic Usage:
 
 csharp
-using (_logger.TimeOperation("DatabaseQuery"))
+using (_logger.TimeOperation("OperationName"))
 {
-    // Execute database query
+    // Your code here
 }
-With custom log level:
+With Custom Log Level:
 
 csharp
 using (_logger.TimeOperation("CriticalOperation", LogLevel.Warning))
 {
-    // Execute critical operation
+    // Critical operation
 }
-With additional properties:
+With Additional Properties:
 
 csharp
-using (_logger.TimeOperation("ProcessPayment", 
-       properties: ("PaymentId", paymentId), ("Amount", amount)))
+using (_logger.TimeOperation("ProcessOrder", 
+       properties: ("OrderId", orderId), ("Customer", customerName)))
 {
-    // Process payment
+    // Process order
 }
-This implementation provides a clean, type-safe way to measure and log operation durations while maintaining all the contextual information from the previous solution.
+Expected Output Examples
+For /test endpoint:
+
+2024-05-15 16:45:22 [54321] [/test] [Test.Get] Operation TestController.Get completed in 128ms
+For /test/long endpoint:
+
+2024-05-15 16:46:05 [54321] [/test/long] [Test.GetLongRunning] Operation LongRunningOperation completed in 1002ms
+This complete implementation provides:
+
+Structured logging with timestamps, process IDs, request paths, and action paths
+
+Operation timing with the disposable timer pattern
+
+Flexible logging with custom levels and additional properties
+
+Clean separation between logging infrastructure and application code
