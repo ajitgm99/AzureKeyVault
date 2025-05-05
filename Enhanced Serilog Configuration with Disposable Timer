@@ -1,0 +1,199 @@
+Enhanced Serilog Configuration with Disposable Timer
+I'll modify the solution to include a DisposableTimer class that measures and logs operation durations, while maintaining all the previous functionality (timestamp, process ID, request path, etc.). Here's the complete implementation:
+
+Updated Project Structure
+Solution/
+├── Common.Logging/
+│   ├── Enrichers/
+│   │   ├── TimeTakenEnricher.cs
+│   │   ├── RequestPathEnricher.cs
+│   ├── Extensions/
+│   │   ├── SerilogExtensions.cs
+│   ├── Utilities/
+│   │   ├── DisposableTimer.cs           # New
+│   ├── SerilogConfig.cs
+│   ├── Common.Logging.csproj
+├── WebApi/
+│   ├── Program.cs
+│   ├── WebApi.csproj
+Implementation Updates
+1. Common.Logging (Class Library)
+Utilities/DisposableTimer.cs (new file):
+
+csharp
+using System;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+
+namespace Common.Logging.Utilities;
+
+public class DisposableTimer : IDisposable
+{
+    private readonly ILogger _logger;
+    private readonly Stopwatch _stopwatch;
+    private readonly string _operationName;
+    private readonly LogLevel _logLevel;
+    private readonly IDisposable _scope;
+
+    public DisposableTimer(
+        ILogger logger,
+        string operationName,
+        LogLevel logLevel = LogLevel.Information,
+        params (string key, object value)[] properties)
+    {
+        _logger = logger;
+        _operationName = operationName;
+        _logLevel = logLevel;
+        _stopwatch = Stopwatch.StartNew();
+        
+        // Create a logging scope with additional properties
+        _scope = _logger.BeginScope(properties.ToDictionary(
+            x => x.key,
+            x => x.value));
+    }
+
+    public void Dispose()
+    {
+        _stopwatch.Stop();
+        _scope?.Dispose();
+        
+        _logger.Log(
+            _logLevel,
+            "Operation {OperationName} completed in {ElapsedMs}ms", 
+            _operationName, 
+            _stopwatch.ElapsedMilliseconds);
+    }
+}
+
+public static class DisposableTimerExtensions
+{
+    public static DisposableTimer TimeOperation(
+        this ILogger logger,
+        string operationName,
+        LogLevel logLevel = LogLevel.Information,
+        params (string key, object value)[] properties)
+    {
+        return new DisposableTimer(logger, operationName, logLevel, properties);
+    }
+}
+SerilogConfig.cs (updated to include timer):
+
+csharp
+using Common.Logging.Extensions;
+using Serilog;
+using Serilog.Formatting;
+
+namespace Common.Logging;
+
+public static class SerilogConfig
+{
+    public static ILogger CreateBootstrapLogger()
+    {
+        return new LoggerConfiguration()
+            .WithBasicEnrichers()
+            .WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{ProcessId}] {Message}{NewLine}{Exception}")
+            .CreateBootstrapLogger();
+    }
+
+    public static IHostBuilder UseSerilogConfiguration(this IHostBuilder hostBuilder)
+    {
+        return hostBuilder.UseSerilog((context, services, configuration) => 
+        {
+            configuration
+                .WithWebApiEnrichers()
+                .WriteTo.Console(outputTemplate: 
+                    "{Timestamp:yyyy-MM-dd HH:mm:ss} " +
+                    "[{ProcessId}] " +
+                    "[{RequestPath}] " +
+                    "[{ActionPath}] " +
+                    "{Message}{NewLine}{Exception}");
+        });
+    }
+}
+2. WebApi Project Updates
+Controllers/TestController.cs (example usage):
+
+csharp
+using Common.Logging.Utilities;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+namespace WebApi.Controllers;
+
+[ApiController]
+[Route("[controller]")]
+public class TestController : ControllerBase
+{
+    private readonly ILogger<TestController> _logger;
+
+    public TestController(ILogger<TestController> logger)
+    {
+        _logger = logger;
+    }
+
+    [HttpGet]
+    public IActionResult Get()
+    {
+        using (_logger.TimeOperation("TestController.Get", 
+               properties: ("RequestId", Guid.NewGuid())))
+        {
+            // Simulate work
+            Thread.Sleep(100);
+            
+            return Ok("Hello World");
+        }
+    }
+}
+Expected Output
+When you hit the /test endpoint, you'll see logs like:
+
+2024-05-15 15:30:45 [12345] [/test] [Test.Get] Operation TestController.Get completed in 102ms
+Key Features
+DisposableTimer:
+
+Automatically measures and logs operation duration
+
+Supports custom log levels
+
+Includes operation name in logs
+
+Implements proper disposal pattern
+
+Supports logging scopes with additional properties
+
+Extension Method:
+
+Clean syntax for starting timers (logger.TimeOperation())
+
+Optional parameters for log level and additional properties
+
+Integration:
+
+Works with existing enrichers (timestamp, process ID, request path)
+
+Maintains clean separation between infrastructure and application code
+
+Usage Examples
+Basic usage:
+
+csharp
+using (_logger.TimeOperation("DatabaseQuery"))
+{
+    // Execute database query
+}
+With custom log level:
+
+csharp
+using (_logger.TimeOperation("CriticalOperation", LogLevel.Warning))
+{
+    // Execute critical operation
+}
+With additional properties:
+
+csharp
+using (_logger.TimeOperation("ProcessPayment", 
+       properties: ("PaymentId", paymentId), ("Amount", amount)))
+{
+    // Process payment
+}
+This implementation provides a clean, type-safe way to measure and log operation durations while maintaining all the contextual information from the previous solution.
