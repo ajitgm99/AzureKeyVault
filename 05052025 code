@@ -1,0 +1,198 @@
+Advanced Serilog Configuration with Custom Enricher and Extensions
+Here's a comprehensive solution for implementing advanced Serilog logging with custom enrichers in a class library and consuming it in a Web API project.
+
+Project Structure
+Solution/
+├── Common.Logging/                # Class Library
+│   ├── Enrichers/
+│   │   ├── ExecutionTimeEnricher.cs
+│   ├── Extensions/
+│   │   ├── SerilogExtensions.cs
+│   ├── Models/
+│   │   ├── LoggingOptions.cs
+│   └── Common.Logging.csproj
+├── WebApi/                       # Web API Project
+│   ├── Program.cs
+│   ├── appsettings.json
+│   └── WebApi.csproj
+1. Common.Logging Class Library
+LoggingOptions.cs
+csharp
+namespace Common.Logging.Models
+{
+    public class LoggingOptions
+    {
+        public string OutputTemplate { get; set; } = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}";
+        public string FilePath { get; set; } = "logs/log-.txt";
+        public int RetainedFileCountLimit { get; set; } = 31;
+        public bool RollOnFileSizeLimit { get; set; } = true;
+        public long FileSizeLimitBytes { get; set; } = 1073741824; // 1GB
+    }
+}
+ExecutionTimeEnricher.cs
+csharp
+using Serilog.Core;
+using Serilog.Events;
+
+namespace Common.Logging.Enrichers
+{
+    public class ExecutionTimeEnricher : ILogEventEnricher
+    {
+        private const string PropertyName = "ExecutionTime";
+        private readonly DateTime _startTime;
+
+        public ExecutionTimeEnricher()
+        {
+            _startTime = DateTime.UtcNow;
+        }
+
+        public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
+        {
+            var elapsed = DateTime.UtcNow - _startTime;
+            var property = propertyFactory.CreateProperty(PropertyName, elapsed.TotalMilliseconds);
+            logEvent.AddPropertyIfAbsent(property);
+        }
+    }
+}
+SerilogExtensions.cs
+csharp
+using Common.Logging.Enrichers;
+using Common.Logging.Models;
+using Serilog;
+using Serilog.Formatting.Compact;
+using Serilog.Formatting.Json;
+
+namespace Common.Logging.Extensions
+{
+    public static class SerilogExtensions
+    {
+        public static IHostBuilder UseCommonSerilog(this IHostBuilder hostBuilder, LoggingOptions options = null)
+        {
+            options ??= new LoggingOptions();
+
+            return hostBuilder.UseSerilog((context, services, configuration) => ConfigureSerilog(context, configuration, options));
+        }
+
+        private static void ConfigureSerilog(HostBuilderContext context, LoggerConfiguration configuration, LoggingOptions options)
+        {
+            configuration
+                .MinimumLevel.Information()
+                .Enrich.FromLogContext()
+                .Enrich.WithProcessId()
+                .Enrich.WithMachineName()
+                .Enrich.WithThreadId()
+                .Enrich.With(new ExecutionTimeEnricher())
+                .WriteTo.Console(outputTemplate: options.OutputTemplate)
+                .WriteTo.File(
+                    path: options.FilePath,
+                    outputTemplate: options.OutputTemplate,
+                    rollingInterval: RollingInterval.Day,
+                    retainedFileCountLimit: options.RetainedFileCountLimit,
+                    rollOnFileSizeLimit: options.RollOnFileSizeLimit,
+                    fileSizeLimitBytes: options.FileSizeLimitBytes);
+        }
+    }
+}
+2. Web API Project
+appsettings.json
+json
+{
+  "Logging": {
+    "OutputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [P:{ProcessId}] [T:{ThreadId}] [{Level:u3}] {Message:lj} (ExecTime:{ExecutionTime}ms){NewLine}{Exception}",
+    "FilePath": "logs/webapi-.log",
+    "RetainedFileCountLimit": 7,
+    "RollOnFileSizeLimit": true,
+    "FileSizeLimitBytes": 536870912
+  },
+  // Other configurations...
+}
+Program.cs
+csharp
+using Common.Logging.Extensions;
+using Common.Logging.Models;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddControllers();
+
+// Configure Serilog from Common.Logging
+var loggingOptions = builder.Configuration.GetSection("Logging").Get<LoggingOptions>();
+builder.Host.UseCommonSerilog(loggingOptions);
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
+Example Controller with Logging
+csharp
+using Microsoft.AspNetCore.Mvc;
+using Serilog;
+
+namespace WebApi.Controllers
+{
+    [ApiController]
+    [Route("[controller]")]
+    public class WeatherForecastController : ControllerBase
+    {
+        private static readonly string[] Summaries = new[]
+        {
+            "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+        };
+
+        private readonly ILogger<WeatherForecastController> _logger;
+
+        public WeatherForecastController(ILogger<WeatherForecastController> logger)
+        {
+            _logger = logger;
+        }
+
+        [HttpGet]
+        public IEnumerable<WeatherForecast> Get()
+        {
+            _logger.LogInformation("Getting weather forecast");
+            
+            try
+            {
+                var result = Enumerable.Range(1, 5).Select(index => new WeatherForecast
+                {
+                    Date = DateTime.Now.AddDays(index),
+                    TemperatureC = Random.Shared.Next(-20, 55),
+                    Summary = Summaries[Random.Shared.Next(Summaries.Length)]
+                })
+                .ToArray();
+
+                _logger.LogInformation("Successfully retrieved {Count} forecasts", result.Length);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting weather forecast");
+                throw;
+            }
+        }
+    }
+}
+Expected Log Output
+2023-10-15 14:30:45.123 +00:00 [P:1234] [T:12] [INF] Getting weather forecast (ExecTime:1.23ms)
+2023-10-15 14:30:45.125 +00:00 [P:1234] [T:12] [INF] Successfully retrieved 5 forecasts (ExecTime:3.45ms)
+Key Features
+Custom Enricher: ExecutionTimeEnricher adds execution time to each log entry
+
+Standard Enrichers: Process ID, Thread ID, Machine Name
+
+Flexible Configuration: Configurable via LoggingOptions and appsettings.json
+
+File Rotation: Daily file rotation with size limits
+
+Simple Text Format: Human-readable output with all required information
+
+Reusable: Common logging configuration in a shared library
+
+This implementation provides a clean separation between the logging infrastructure (in the class library) and the application-specific configuration (in the Web API project).
+
+New chat
