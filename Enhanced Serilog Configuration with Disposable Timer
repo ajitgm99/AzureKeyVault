@@ -470,3 +470,128 @@ The enricher is only registered when running in a web context where IHttpContext
 During application startup, the service provider is available to resolve dependencies
 
 This approach maintains all the functionality while properly handling the dependency injection requirements of the RequestPathEnricher.
+************************************************************************************************************************************
+1. Update DisposableTimer.cs
+csharp
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Context;
+
+namespace Common.Logging.Utilities;
+
+public class DisposableTimer : IDisposable
+{
+    private readonly ILogger _logger;
+    private readonly Stopwatch _stopwatch;
+    private readonly string _operationName;
+    private readonly LogLevel _logLevel;
+    private readonly IDisposable _logContext;
+
+    public DisposableTimer(
+        ILogger logger,
+        string operationName,
+        LogLevel logLevel = LogLevel.Information,
+        params (string key, object value)[] properties)
+    {
+        _logger = logger;
+        _operationName = operationName;
+        _logLevel = logLevel;
+        _stopwatch = Stopwatch.StartNew();
+        
+        // Create a dictionary of properties
+        var propsDict = new Dictionary<string, object>();
+        foreach (var (key, value) in properties)
+        {
+            propsDict[key] = value;
+        }
+        
+        // Create log context with properties
+        _logContext = LogContext.PushProperties(propsDict);
+    }
+
+    public void Dispose()
+    {
+        _stopwatch.Stop();
+        using (_logContext)
+        {
+            _logger.Log(
+                _logLevel,
+                "Operation {OperationName} completed in {ElapsedMs}ms", 
+                _operationName, 
+                _stopwatch.ElapsedMilliseconds);
+        }
+    }
+}
+
+public static class DisposableTimerExtensions
+{
+    public static DisposableTimer TimeOperation(
+        this ILogger logger,
+        string operationName,
+        LogLevel logLevel = LogLevel.Information,
+        params (string key, object value)[] properties)
+    {
+        return new DisposableTimer(logger, operationName, logLevel, properties);
+    }
+}
+2. Update SerilogConfig.cs
+csharp
+using Common.Logging.Extensions;
+using Serilog;
+using Serilog.Formatting;
+using Serilog.Formatting.Display;
+
+namespace Common.Logging;
+
+public static class SerilogConfig
+{
+    public static ILogger CreateBootstrapLogger()
+    {
+        return new LoggerConfiguration()
+            .WithBasicEnrichers()
+            .WriteTo.Console(outputTemplate: 
+                "{Timestamp:yyyy-MM-dd HH:mm:ss} [{ProcessId}] {Message} {Properties}{NewLine}{Exception}")
+            .CreateBootstrapLogger();
+    }
+
+    public static IHostBuilder UseSerilogConfiguration(this IHostBuilder hostBuilder)
+    {
+        return hostBuilder.UseSerilog((context, services, configuration) => 
+        {
+            configuration
+                .WithWebApiEnrichers(services)
+                .WriteTo.Console(
+                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} " +
+                                  "[{ProcessId}] " +
+                                  "[{RequestPath}] " +
+                                  "[{ActionPath}] " +
+                                  "{Message} " +
+                                  "Properties: {Properties}{NewLine}{Exception}");
+        });
+    }
+}
+3. Update TestController.cs Example
+csharp
+[HttpGet("order/{orderId}")]
+public IActionResult ProcessOrder(int orderId)
+{
+    var customerName = "John Doe"; // In reality, this would come from your data
+    
+    using (_logger.TimeOperation("ProcessOrder", 
+           properties: ("OrderId", orderId), 
+                   ("Customer", customerName),
+                   ("Status", "Processing")))
+    {
+        // Simulate order processing
+        Thread.Sleep(new Random().Next(50, 200));
+        
+        return Ok(new { 
+            OrderId = orderId, 
+            Status = "Processed",
+            Customer = customerName 
+        });
+    }
+}
