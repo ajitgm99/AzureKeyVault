@@ -595,3 +595,88 @@ public IActionResult ProcessOrder(int orderId)
         });
     }
 }
+
+
+********************
+final one
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Context;
+
+namespace Common.Logging.Utilities;
+
+public class DisposableTimer : IDisposable
+{
+    private readonly ILogger _logger;
+    private readonly Stopwatch _stopwatch;
+    private readonly string _operationName;
+    private readonly LogLevel _logLevel;
+    private readonly IDisposable _logContext;
+
+    public DisposableTimer(
+        ILogger logger,
+        string operationName,
+        LogLevel logLevel = LogLevel.Information,
+        params (string key, object value)[] properties)
+    {
+        _logger = logger;
+        _operationName = operationName;
+        _logLevel = logLevel;
+        _stopwatch = Stopwatch.StartNew();
+        
+        // Create log context with properties
+        var propertiesList = new List<IDisposable>();
+        foreach (var (key, value) in properties)
+        {
+            propertiesList.Add(LogContext.PushProperty(key, value));
+        }
+        _logContext = new AggregateDisposable(propertiesList);
+    }
+
+    public void Dispose()
+    {
+        _stopwatch.Stop();
+        using (_logContext)
+        {
+            _logger.Log(
+                _logLevel,
+                "Operation {OperationName} completed in {ElapsedMs}ms", 
+                _operationName, 
+                _stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    private class AggregateDisposable : IDisposable
+    {
+        private readonly IEnumerable<IDisposable> _disposables;
+
+        public AggregateDisposable(IEnumerable<IDisposable> disposables)
+        {
+            _disposables = disposables;
+        }
+
+        public void Dispose()
+        {
+            foreach (var disposable in _disposables)
+            {
+                disposable.Dispose();
+            }
+        }
+    }
+}
+
+public static class DisposableTimerExtensions
+{
+    public static DisposableTimer TimeOperation(
+        this ILogger logger,
+        string operationName,
+        LogLevel logLevel = LogLevel.Information,
+        params (string key, object value)[] properties)
+    {
+        return new DisposableTimer(logger, operationName, logLevel, properties);
+    }
+}
