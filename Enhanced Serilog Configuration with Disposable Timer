@@ -334,3 +334,139 @@ Operation timing with the disposable timer pattern
 Flexible logging with custom levels and additional properties
 
 Clean separation between logging infrastructure and application code
+************************************************************************************************************************************
+Getting an error in SerilogExtension.cs - RequestpathEnchricher must be a non abstract type with a public paramterless constructor in orer to use it as parmeter 'Tenricher' in generic type or method 'loggerEnchrichmentconfiguratinon with <tenchircher>
+The error occurs because Serilog's Enrich.With<TEnricher>() requires the enricher to have a parameterless constructor, but our RequestPathEnricher requires IHttpContextAccessor. Here's how to fix this:
+
+Updated Solution
+1. Modify the RequestPathEnricher registration
+Extensions/SerilogExtensions.cs (updated):
+
+csharp
+using Common.Logging.Enrichers;
+using Microsoft.AspNetCore.Http;
+using Serilog;
+
+namespace Common.Logging.Extensions;
+
+public static class SerilogExtensions
+{
+    public static LoggerConfiguration WithBasicEnrichers(this LoggerConfiguration config)
+    {
+        return config
+            .Enrich.WithProcessId()
+            .Enrich.WithMachineName()
+            .Enrich.With(new TimeTakenEnricher());
+    }
+
+    public static LoggerConfiguration WithWebApiEnrichers(this LoggerConfiguration config, IServiceProvider serviceProvider = null)
+    {
+        var enrichedConfig = config
+            .WithBasicEnrichers()
+            .Enrich.FromLogContext();
+
+        if (serviceProvider != null)
+        {
+            var httpContextAccessor = serviceProvider.GetService<IHttpContextAccessor>();
+            if (httpContextAccessor != null)
+            {
+                enrichedConfig = enrichedConfig
+                    .Enrich.With(new RequestPathEnricher(httpContextAccessor));
+            }
+        }
+
+        return enrichedConfig;
+    }
+}
+2. Update SerilogConfig.cs
+SerilogConfig.cs (updated):
+
+csharp
+using Common.Logging.Extensions;
+using Serilog;
+
+namespace Common.Logging;
+
+public static class SerilogConfig
+{
+    public static ILogger CreateBootstrapLogger()
+    {
+        return new LoggerConfiguration()
+            .WithBasicEnrichers()
+            .WriteTo.Console(outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{ProcessId}] {Message}{NewLine}{Exception}")
+            .CreateBootstrapLogger();
+    }
+
+    public static IHostBuilder UseSerilogConfiguration(this IHostBuilder hostBuilder)
+    {
+        return hostBuilder.UseSerilog((context, services, configuration) => 
+        {
+            configuration
+                .WithWebApiEnrichers(services)
+                .WriteTo.Console(outputTemplate: 
+                    "{Timestamp:yyyy-MM-dd HH:mm:ss} " +
+                    "[{ProcessId}] " +
+                    "[{RequestPath}] " +
+                    "[{ActionPath}] " +
+                    "{Message}{NewLine}{Exception}");
+        });
+    }
+}
+3. Keep RequestPathEnricher.cs the same
+The RequestPathEnricher implementation remains unchanged:
+
+csharp
+using Microsoft.AspNetCore.Http;
+using Serilog.Core;
+using Serilog.Events;
+
+namespace Common.Logging.Enrichers;
+
+public class RequestPathEnricher : ILogEventEnricher
+{
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public RequestPathEnricher(IHttpContextAccessor httpContextAccessor)
+    {
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
+    {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext == null) return;
+
+        var requestPath = httpContext.Request.Path;
+        logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("RequestPath", requestPath));
+
+        var endpoint = httpContext.GetEndpoint();
+        if (endpoint != null)
+        {
+            var actionDescriptor = endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor>();
+            if (actionDescriptor != null)
+            {
+                logEvent.AddPropertyIfAbsent(propertyFactory.CreateProperty("ActionPath", 
+                    $"{actionDescriptor.ControllerName}.{actionDescriptor.ActionName}"));
+            }
+        }
+    }
+}
+Key Changes Made:
+Removed generic With<TEnricher> usage and replaced it with direct instantiation
+
+Added IServiceProvider parameter to WithWebApiEnrichers to resolve dependencies
+
+Manually create enricher instance with its required dependencies
+
+Conditional registration of the RequestPathEnricher only when IHttpContextAccessor is available
+
+Why This Works:
+We're no longer relying on Serilog's automatic instantiation of the enricher
+
+We're manually creating the enricher with its required dependencies
+
+The enricher is only registered when running in a web context where IHttpContextAccessor is available
+
+During application startup, the service provider is available to resolve dependencies
+
+This approach maintains all the functionality while properly handling the dependency injection requirements of the RequestPathEnricher.
