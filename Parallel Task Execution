@@ -1,0 +1,162 @@
+Creating a Custom Method for Parallel Task Execution in C#
+Here's a custom method that can execute multiple tasks simultaneously and wait for all of them to complete:
+
+csharp
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+public class ParallelTaskExecutor
+{
+    /// <summary>
+    /// Executes multiple tasks in parallel and waits for all to complete
+    /// </summary>
+    /// <param name="taskFunctions">Array of functions that return Tasks</param>
+    /// <returns>A Task that completes when all provided tasks complete</returns>
+    public static async Task ExecuteAndWaitAll(params Func<Task>[] taskFunctions)
+    {
+        if (taskFunctions == null || taskFunctions.Length == 0)
+        {
+            return;
+        }
+
+        var tasks = new List<Task>();
+
+        foreach (var taskFunction in taskFunctions)
+        {
+            if (taskFunction != null)
+            {
+                tasks.Add(taskFunction());
+            }
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Executes multiple tasks in parallel and waits for all to complete
+    /// </summary>
+    /// <typeparam name="T">Type of the task result</typeparam>
+    /// <param name="taskFunctions">Array of functions that return Tasks of type T</param>
+    /// <returns>An array of results when all tasks complete</returns>
+    public static async Task<T[]> ExecuteAndWaitAll<T>(params Func<Task<T>>[] taskFunctions)
+    {
+        if (taskFunctions == null || taskFunctions.Length == 0)
+        {
+            return Array.Empty<T>();
+        }
+
+        var tasks = new List<Task<T>>();
+
+        foreach (var taskFunction in taskFunctions)
+        {
+            if (taskFunction != null)
+            {
+                tasks.Add(taskFunction());
+            }
+        }
+
+        return await Task.WhenAll(tasks);
+    }
+}
+Usage Examples
+1. For void-returning tasks:
+csharp
+await ParallelTaskExecutor.ExecuteAndWaitAll(
+    () => DoSomethingAsync(),
+    () => DoSomethingElseAsync(),
+    () => AndAnotherThingAsync()
+);
+2. For tasks that return values:
+csharp
+var results = await ParallelTaskExecutor.ExecuteAndWaitAll(
+    () => GetUserDataAsync(1),
+    () => GetProductDataAsync(42),
+    () => GetInventoryStatusAsync()
+);
+
+// results[0] contains user data
+// results[1] contains product data
+// results[2] contains inventory status
+Key Features
+Flexible Parameter Count: Accepts any number of task functions through the params array
+
+Type Safety: Generic version preserves return types
+
+Null Checking: Safely handles null task functions
+
+Error Handling: Any exceptions will propagate when Task.WhenAll completes
+
+Async/Await: Properly uses async/await pattern
+
+Error Handling Note
+If any of the tasks fail, the exception will be thrown when await Task.WhenAll completes. You might want to wrap the call in a try-catch block to handle exceptions appropriately.
+
+Would you like me to add any additional features to this implementation?
+
+why two method given
+You're absolutely right to ask why there are two methods! The two methods serve different purposes based on whether the tasks you want to execute return a value or not. Let me explain the difference:
+
+1. ExecuteAndWaitAll(params Func<Task>[] taskFunctions)
+For tasks that don't return a value (void-returning async methods)
+
+Example: Sending emails, logging, etc.
+
+Usage:
+
+csharp
+await ExecuteAndWaitAll(
+    () => LogActivityAsync(),
+    () => SendNotificationAsync(),
+    () => UpdateStatusAsync()
+);
+2. ExecuteAndWaitAll<T>(params Func<Task<T>>[] taskFunctions)
+For tasks that return a value (generic async methods)
+
+Example: Fetching data from multiple sources
+
+Usage:
+
+csharp
+var results = await ExecuteAndWaitAll(
+    () => GetUserDataAsync(userId),
+    () => GetOrderDataAsync(orderId),
+    () => GetInventoryAsync(productId)
+);
+// results[0] = user data
+// results[1] = order data
+// results[2] = inventory data
+Why Two Methods Are Needed:
+Type Safety: C# requires different method signatures for methods that return values vs void methods
+
+Compiler Support: The compiler needs to know whether to expect return values
+
+Practical Usage:
+
+For void methods, you just want to wait for completion
+
+For value-returning methods, you want to collect the results
+
+What Would Happen With Just One Method?
+If we only had the generic version:
+
+Void tasks wouldn't compile (they don't return Task<T>)
+
+We'd have to return dummy values from void methods
+
+If we only had the non-generic version:
+
+We wouldn't be able to get results from tasks that return values
+
+We'd lose the ability to process the returned data
+
+Alternative Approach (Single Method)
+If you really want just one method, you could:
+
+Always use the generic version and return dummy values for void operations
+
+Or use Task<object> and cast everything, but this would be messy and lose type safety
+
+The two-method approach is cleaner and follows C#'s standard patterns (like Task.Run vs Task.Run<T>).
+
+Would you like me to show you an alternative implementation that combines these into one method with a different approach?
