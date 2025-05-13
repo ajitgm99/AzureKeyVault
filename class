@@ -1,0 +1,18 @@
+using System.Collections.Generic;
+using System.Runtime.Serialization;
+
+[DataContract]
+public class MongoQueryParam
+{
+    [DataMember(Name = "db")]
+    public string DbName { get; set; }
+
+    [DataMember(Name = "collection")]
+    public string CollectionName { get; set; }
+
+    [DataMember(Name = "selectColumng")]
+    public List<string> Inclusions { get; set; }
+
+    [DataMember(Name = "queryFilterMap")]
+    public Dictionary<string, object> Filters { get; set; }
+}
