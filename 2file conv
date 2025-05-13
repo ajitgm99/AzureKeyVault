@@ -1,0 +1,68 @@
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+
+public class MongoQueryParam
+{
+    public string DbName { get; set; }
+    public string CollectionName { get; set; }
+    public List<string> Inclusions { get; set; }
+    public Dictionary<string, object> Filters { get; set; }
+}
+
+public class MongoQueryParamConverter : JsonConverter<MongoQueryParam>
+{
+    private static readonly Dictionary<string, string[]> FieldAliases = new()
+    {
+        { nameof(MongoQueryParam.DbName), new[] { "db", "database" } },
+        { nameof(MongoQueryParam.CollectionName), new[] { "collection", "collectionName" } },
+        { nameof(MongoQueryParam.Inclusions), new[] { "selectColumng", "fields" } },
+        { nameof(MongoQueryParam.Filters), new[] { "queryFilterMap", "filters" } }
+    };
+
+    public override MongoQueryParam ReadJson(JsonReader reader, Type objectType, MongoQueryParam existingValue, bool hasExistingValue, JsonSerializer serializer)
+    {
+        var jo = JObject.Load(reader);
+        var result = new MongoQueryParam();
+
+        result.DbName = GetFirstMatchingValue<string>(jo, FieldAliases[nameof(MongoQueryParam.DbName)]);
+        result.CollectionName = GetFirstMatchingValue<string>(jo, FieldAliases[nameof(MongoQueryParam.CollectionName)]);
+        result.Inclusions = GetFirstMatchingValue<List<string>>(jo, FieldAliases[nameof(MongoQueryParam.Inclusions)]) ?? new();
+        result.Filters = GetFirstMatchingValue<Dictionary<string, object>>(jo, FieldAliases[nameof(MongoQueryParam.Filters)]) ?? new();
+
+        return result;
+    }
+
+    private T GetFirstMatchingValue<T>(JObject jo, string[] aliases)
+    {
+        foreach (var key in aliases)
+        {
+            if (jo.TryGetValue(key, StringComparison.OrdinalIgnoreCase, out var token))
+                return token.ToObject<T>();
+        }
+        return default;
+    }
+
+    public override void WriteJson(JsonWriter writer, MongoQueryParam value, JsonSerializer serializer)
+    {
+        var jo = new JObject
+        {
+            ["db"] = value.DbName,
+            ["collection"] = value.CollectionName,
+            ["selectColumng"] = JToken.FromObject(value.Inclusions ?? new()),
+            ["queryFilterMap"] = JToken.FromObject(value.Filters ?? new())
+        };
+
+        jo.WriteTo(writer);
+    }
+}
+
+
+
+var settings = new JsonSerializerSettings
+{
+    Converters = new List<JsonConverter> { new MongoQueryParamConverter() }
+};
+
+MongoQueryParam param = JsonConvert.DeserializeObject<MongoQueryParam>(jsonString, settings);
