@@ -1,0 +1,42 @@
+using System;
+using System.Text.Json;
+using System.Collections.Generic;
+
+public class Program
+{
+    public static void Main()
+    {
+        string jsonData = "{\"db\":\"CVA\",\"collection\":\"CVA NETTINGSET '_FIRM\",\"queryFilterMap\":{\"cobDate\":\"2025-05-02\"},\"selectColumns\":[\"nettingSets.self.creditCurve.curveId\",\"nettingSets.self.fundingCurve.tlv.curveId\",\"nettingSets.counterparty.creditCurve.curveId\"]}";
+        
+        using JsonDocument doc = JsonDocument.Parse(jsonData);
+        var values = new List<string>();
+        GetValues(doc.RootElement, values);
+
+        foreach (var value in values)
+        {
+            Console.WriteLine(value);
+        }
+    }
+
+    public static void GetValues(JsonElement element, List<string> values)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in element.EnumerateObject())
+            {
+                GetValues(property.Value, values);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in element.EnumerateArray())
+            {
+                GetValues(item, values);
+            }
+        }
+        else
+        {
+            values.Add(element.ToString());
+        }
+    }
+}
