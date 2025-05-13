@@ -6,44 +6,42 @@ public class Program
 {
     public static void Main()
     {
-        const string jsonData = "{\"db\":\"CVA\",\"collection\":\"CVA NETTINGSET '_FIRM\",\"queryFilterMap\":{\"cobDate\":\"2025-05-02\"},\"selectColumns\":[\"nettingSets.self.creditCurve.curveId\",\"nettingSets.self.fundingCurve.tlv.curveId\",\"nettingSets.counterparty.creditCurve.curveId\"]}";
+        string jsonData = "{\"db\":\"CVA\",\"collection\":\"CVA NETTINGSET '_FIRM\",\"queryFilterMap\":{\"cobDate\":\"2025-05-02\"},\"selectColumns\":[\"nettingSets.self.creditCurve.curveId\",\"nettingSets.self.fundingCurve.tlv.curveId\",\"nettingSets.counterparty.creditCurve.curveId\"]}";
         
         using JsonDocument doc = JsonDocument.Parse(jsonData);
-        var values = ExtractAllValues(doc.RootElement);
+        var entries = new List<string>();
+        GetPropertiesAndValues(doc.RootElement, entries, null);
 
-        foreach (string value in values)
+        foreach (var entry in entries)
         {
-            Console.WriteLine(value);
+            Console.WriteLine(entry);
         }
     }
 
-    public static List<string> ExtractAllValues(JsonElement element)
-    {
-        var values = new List<string>();
-        ExtractValues(element, values);
-        return values;
-    }
-
-    private static void ExtractValues(JsonElement element, List<string> values)
+    public static void GetPropertiesAndValues(JsonElement element, List<string> entries, string currentPath)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    ExtractValues(property.Value, values);
+                    string newPath = currentPath != null ? $"{currentPath}.{property.Name}" : property.Name;
+                    GetPropertiesAndValues(property.Value, entries, newPath);
                 }
                 break;
                 
             case JsonValueKind.Array:
+                int index = 0;
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    ExtractValues(item, values);
+                    string newPath = $"{currentPath}[{index}]";
+                    GetPropertiesAndValues(item, entries, newPath);
+                    index++;
                 }
                 break;
                 
             default:
-                values.Add(element.GetString()!);
+                entries.Add($"{currentPath}: {element}");
                 break;
         }
     }
