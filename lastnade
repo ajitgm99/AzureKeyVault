@@ -1,0 +1,66 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.Serialization;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+[DataContract]
+public class MongoQueryParam
+{
+    [DataMember]
+    public string dbName { get; set; }
+    
+    [DataMember]
+    public string CollectionName { get; set; }
+    
+    [DataMember]
+    public List<string> Inclusions { get; set; }
+    
+    [DataMember]
+    public Dictionary<string, object> Filters { get; set; }
+}
+
+public class Program
+{
+    public static void Main()
+    {
+        string json = @"{
+            ""db"": ""CVA"",
+            ""collection"": ""CA NETTINGSET_CUSTOMER"",
+            ""queryFilterMap"": {
+                ""cobDate"": ""2025-05-02"",
+                ""DobDate"": ""2025-09-04""
+            },
+            ""selectColumng"": [
+                ""nettingSets.self.creditCurve.curveId"",
+                ""nettingSets.self.fundingCurve.tlv.curveld"",
+                ""nettingSets.counterparty.creditCurve.curveId""
+            ]
+        }";
+
+        // Custom converter to handle property name mapping
+        var obj = JsonConvert.DeserializeObject<JObject>(json);
+        
+        var param = new MongoQueryParam
+        {
+            dbName = obj["db"].ToString(),
+            CollectionName = obj["collection"].ToString(),
+            Inclusions = obj["selectColumng"].ToObject<List<string>>(),
+            Filters = obj["queryFilterMap"].ToObject<Dictionary<string, object>>()
+        };
+
+        // Output to verify
+        Console.WriteLine($"dbName: {param.dbName}");
+        Console.WriteLine($"CollectionName: {param.CollectionName}");
+        Console.WriteLine("Filters:");
+        foreach (var filter in param.Filters)
+        {
+            Console.WriteLine($"  {filter.Key}: {filter.Value}");
+        }
+        Console.WriteLine("Inclusions:");
+        foreach (var inclusion in param.Inclusions)
+        {
+            Console.WriteLine($"  {inclusion}");
+        }
+    }
+}
