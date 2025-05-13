@@ -1,0 +1,57 @@
+public class MongoQueryParam
+{
+    public string DbName { get; set; }
+    public string CollectionName { get; set; }
+    public List<string> Inclusions { get; set; }
+    public Dictionary<string, object> Filters { get; set; }
+}
+
+
+
+
+
+
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+public class MongoQueryParamConverter : JsonConverter<MongoQueryParam>
+{
+    public override MongoQueryParam ReadJson(JsonReader reader, Type objectType, MongoQueryParam existingValue, bool hasExistingValue, JsonSerializer serializer)
+    {
+        var jo = JObject.Load(reader);
+
+        var result = new MongoQueryParam
+        {
+            DbName = jo.Value<string>("db") ?? jo.Value<string>("database"),
+            CollectionName = jo.Value<string>("collection") ?? jo.Value<string>("collectionName"),
+            Inclusions = jo["selectColumng"]?.ToObject<List<string>>() ?? jo["fields"]?.ToObject<List<string>>() ?? new List<string>(),
+            Filters = jo["queryFilterMap"]?.ToObject<Dictionary<string, object>>() ??
+                      jo["filters"]?.ToObject<Dictionary<string, object>>() ?? new Dictionary<string, object>()
+        };
+
+        return result;
+    }
+
+    public override void WriteJson(JsonWriter writer, MongoQueryParam value, JsonSerializer serializer)
+    {
+        // Basic serialization with default names
+        JObject jo = new JObject
+        {
+            ["db"] = value.DbName,
+            ["collection"] = value.CollectionName,
+            ["selectColumng"] = JToken.FromObject(value.Inclusions ?? new List<string>()),
+            ["queryFilterMap"] = JToken.FromObject(value.Filters ?? new Dictionary<string, object>())
+        };
+
+        jo.WriteTo(writer);
+    }
+}
+
+
+
+var settings = new JsonSerializerSettings
+{
+    Converters = new List<JsonConverter> { new MongoQueryParamConverter() }
+};
+
+var param = JsonConvert.DeserializeObject<MongoQueryParam>(jsonString, settings);
