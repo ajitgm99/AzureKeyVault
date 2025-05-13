@@ -1,6 +1,10 @@
+If you want the `selectColumns` array values to appear in a single line/entry (rather than separate entries with indices), here's the modified version:
+
+```csharp
 using System;
 using System.Text.Json;
 using System.Collections.Generic;
+using System.Linq;
 
 public class Program
 {
@@ -26,11 +30,19 @@ public class Program
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
                     string newPath = currentPath != null ? $"{currentPath}.{property.Name}" : property.Name;
-                    GetPropertiesAndValues(property.Value, entries, newPath);
+                    if (property.Name == "selectColumns")
+                    {
+                        // Handle selectColumns as a special case
+                        entries.Add($"{newPath}: {string.Join(", ", property.Value.EnumerateArray().Select(x => x.ToString()))}");
+                    }
+                    else
+                    {
+                        GetPropertiesAndValues(property.Value, entries, newPath);
+                    }
                 }
                 break;
                 
-            case JsonValueKind.Array:
+            case JsonValueKind.Array when currentPath?.EndsWith("selectColumns") != true:
                 int index = 0;
                 foreach (JsonElement item in element.EnumerateArray())
                 {
@@ -46,3 +58,20 @@ public class Program
         }
     }
 }
+```
+
+### Output:
+```
+db: CVA
+collection: CVA NETTINGSET '_FIRM
+queryFilterMap.cobDate: 2025-05-02
+selectColumns: nettingSets.self.creditCurve.curveId, nettingSets.self.fundingCurve.tlv.curveId, nettingSets.counterparty.creditCurve.curveId
+```
+
+### Key Changes:
+1. Added special handling for the `selectColumns` property
+2. When encountering `selectColumns`, joins all array values with commas into a single string
+3. All other arrays are still processed with indices (if you have other arrays in your JSON)
+4. Maintains the path notation for all other properties
+
+This gives you the exact output format you requested where the selectColumns values appear together in one line.
