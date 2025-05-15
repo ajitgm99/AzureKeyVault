@@ -1,0 +1,87 @@
+using Serilog.Core;
+using Serilog.Events;
+using Microsoft.AspNetCore.Http;
+using System;
+
+namespace Common.Logging.Enrichers
+{
+    public class RequesterHostnameEnricher : ILogEventEnricher
+    {
+        private readonly IHttpContextAccessor _httpContextAccessor;
+
+        public RequesterHostnameEnricher(IHttpContextAccessor httpContextAccessor)
+        {
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        public void Enrich(LogEvent logEvent, ILogEventPropertyFactory propertyFactory)
+        {
+            try
+            {
+                var context = _httpContextAccessor.HttpContext;
+                var remoteIp = context?.Connection?.RemoteIpAddress?.ToString();
+                var property = propertyFactory.CreateProperty("RequesterHostname", remoteIp ?? "Unknown");
+                logEvent.AddPropertyIfAbsent(property);
+            }
+            catch (Exception)
+            {
+                // fallback in case HttpContext is unavailable
+                var property = propertyFactory.CreateProperty("RequesterHostname", "Unavailable");
+                logEvent.AddPropertyIfAbsent(property);
+            }
+        }
+    }
+}
+
+
+
+
+
+public static class SerilogExtensions
+{
+    public static IHostBuilder UseCommonSerilog(this IHostBuilder hostBuilder, LoggingOptions options = null)
+    {
+        options ??= new LoggingOptions();
+
+        return hostBuilder.ConfigureServices(services =>
+        {
+            services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+            services.AddSingleton<ILogEventEnricher, RequesterHostnameEnricher>();
+        })
+        .UseSerilog((context, services, configuration) =>
+        {
+            var enrichers = services.GetServices<ILogEventEnricher>();
+            ConfigureSerilog(context, configuration, options, enrichers);
+        });
+    }
+
+    private static void ConfigureSerilog(HostBuilderContext context, LoggerConfiguration configuration, LoggingOptions options, IEnumerable<ILogEventEnricher> enrichers)
+    {
+        configuration
+            .MinimumLevel.Information()
+            .Enrich.FromLogContext()
+            .Enrich.WithProcessId()
+            .Enrich.WithMachineName()
+            .Enrich.WithThreadId()
+            .Enrich.With(new ExecutionTimeEnricher())
+            .Enrich.With(enrichers)
+            .WriteTo.Console(outputTemplate: options.OutputTemplate)
+            .WriteTo.File(
+                path: options.FilePath,
+                outputTemplate: options.OutputTemplate,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: options.RetainedFileCountLimit,
+                rollOnFileSizeLimit: options.RollOnFileSizeLimit,
+                fileSizeLimitBytes: options.FileSizeLimitBytes);
+    }
+}
+
+
+"OutputTemplate": "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [P:{ProcessId}] [T:{ThreadId}] [{Level:u3}] {Message:lj} (ExecTime:{ExecutionTime}ms) [Host:{RequesterHostname}]{NewLine}{Exception}"
+
+
+
+
+
+
+
