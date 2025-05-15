@@ -1,3 +1,36 @@
+
+
+# templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: simplicity-api
+  labels:
+    app: simplicity-api
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080  # Change to your app's actual port
+  selector:
+    app: simplicity-api
+
+
+
+
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8080
+
+
+
+
+
+
+
+
 # Load Balancing for Your Web API (http://simplicity/getallstudent)
 
 To apply load balancing to your web API endpoint using Kubernetes and Helm, here are the approaches you can take:
