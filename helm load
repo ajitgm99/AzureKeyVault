@@ -1,0 +1,132 @@
+# Load Balancing for Your Web API (http://simplicity/getallstudent)
+
+To apply load balancing to your web API endpoint using Kubernetes and Helm, here are the approaches you can take:
+
+## Option 1: Using Kubernetes Service with LoadBalancer Type (Simplest)
+
+1. Create a Helm chart or modify your existing one with a `service.yaml` template:
+
+```yaml
+# templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: simplicity-api
+  labels:
+    app: simplicity-api
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080  # Change to your app's actual port
+  selector:
+    app: simplicity-api
+```
+
+2. In your `values.yaml`:
+
+```yaml
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8080
+```
+
+3. Install/upgrade your Helm chart:
+```bash
+helm upgrade --install simplicity-api ./your-chart
+```
+
+This will create an external load balancer that distributes traffic to all pods serving your API.
+
+## Option 2: Using Ingress Controller (More Flexible)
+
+1. First install an ingress controller (if not already installed):
+```bash
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm install ingress-nginx ingress-nginx/ingress-nginx
+```
+
+2. Create an Ingress resource in your Helm chart (`templates/ingress.yaml`):
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simplicity-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /simplicity(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: simplicity-api
+            port:
+              number: 80
+```
+
+3. Configure your `values.yaml`:
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: yourdomain.com
+      paths:
+        - path: /simplicity
+          pathType: Prefix
+```
+
+## Option 3: Advanced Load Balancing Configuration
+
+For more control over load balancing behavior, add annotations to your service:
+
+```yaml
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"  # For AWS Network LB
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+    nginx.ingress.kubernetes.io/load-balance: "round_robin"  # Or "least_conn", "ip_hash"
+```
+
+## Verifying Your Load Balancer
+
+After deployment:
+1. Get the external IP:
+```bash
+kubectl get svc simplicity-api
+```
+
+2. Test your endpoint:
+```bash
+curl http://<EXTERNAL-IP>/simplicity/getallstudent
+```
+
+## Important Considerations
+
+1. Ensure your deployment has multiple replicas for actual load balancing:
+```yaml
+replicaCount: 3
+```
+
+2. Configure proper readiness/liveness probes in your deployment:
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+readinessProbe:
+  httpGet:
+    path: /getallstudent  # Or a dedicated readiness endpoint
+    port: 8080
+```
+
+Would you like me to provide more specific configuration details based on your cloud provider or specific requirements?
