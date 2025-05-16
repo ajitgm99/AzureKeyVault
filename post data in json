@@ -1,0 +1,19 @@
+static async Task PostDataAsync()
+{
+    try
+    {
+        var data = new { Name = "John", Age = 30 };
+        string json = System.Text.Json.JsonSerializer.Serialize(data);
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        
+        HttpResponseMessage response = await client.PostAsync("https://api.example.com/users", content);
+        response.EnsureSuccessStatusCode();
+        
+        string responseBody = await response.Content.ReadAsStringAsync();
+        Console.WriteLine(responseBody);
+    }
+    catch (HttpRequestException e)
+    {
+        Console.WriteLine($"Error: {e.Message}");
+    }
+}
