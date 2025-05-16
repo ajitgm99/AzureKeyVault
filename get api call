@@ -1,0 +1,28 @@
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+
+class Program
+{
+    static async Task Main(string[] args)
+    {
+        using (HttpClient client = new HttpClient())
+        {
+            try
+            {
+                var builder = new UriBuilder("https://api.example.com/data");
+                var query = System.Web.HttpUtility.ParseQueryString(builder.Query);
+                query["param1"] = "value1";
+                query["param2"] = "value2";
+                builder.Query = query.ToString();
+                
+                HttpResponseMessage response = await client.GetAsync(builder.Uri);
+                // ... handle response
+            }
+            catch (HttpRequestException e)
+            {
+                Console.WriteLine($"Request exception: {e.Message}");
+            }
+        }
+    }
+}
