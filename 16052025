@@ -1,0 +1,31 @@
+public async Task<bool> CallDownstreamData(string jsonQuery)
+{
+    try
+    {
+        // Create HttpClient instance (should ideally be reused via HttpClientFactory)
+        using var httpClient = new HttpClient();
+        
+        // Encode the jsonQuery parameter to ensure it's URL-safe
+        var encodedQuery = Uri.EscapeDataString(jsonQuery);
+        
+        // Construct the full URL (replace with your actual base URL)
+        var apiUrl = $"https://yourapi-base-url.com/api/getDownstreamData/{encodedQuery}";
+        
+        // Make the GET request
+        var response = await httpClient.GetAsync(apiUrl);
+        
+        // Ensure success status code
+        response.EnsureSuccessStatusCode();
+        
+        // Read and deserialize the response
+        var result = await response.Content.ReadFromJsonAsync<bool>();
+        
+        return result;
+    }
+    catch (HttpRequestException ex)
+    {
+        // Handle API call errors
+        Console.WriteLine($"Error calling API: {ex.Message}");
+        throw;
+    }
+}
