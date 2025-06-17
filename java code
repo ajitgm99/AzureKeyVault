@@ -1,0 +1,47 @@
+Here's the equivalent Java code for the provided C# snippet:
+
+```java
+import java.io.IOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+
+public class ApiClient {
+    public static void main(String[] args) throws IOException, InterruptedException {
+        String dataproviderAPIURL = "http://www.nsroot.net/api/api23/get/";
+        String jsonQuery = "{" +
+                "\"db\": \"XXX\"," +
+                "\"collection\": \"XX_*_XXX_CONFIG\"," +
+                "\"queryFilterMap\": {}," +
+                "\"selectColumns\": [\"_id\", \"Name\", \"Url\", \"RefreshFrequency\", \"ConnectionTimeout\", \"ReadTin" +
+                "1\"" +
+                "]}";
+        
+        String encodedQuery = URLEncoder.encode(jsonQuery, StandardCharsets.UTF_8);
+        String url = dataproviderAPIURL + encodedQuery;
+        
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .GET()
+                .build();
+        
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        String resultContent = response.body();
+        String strJson = resultContent; // In Java, we typically parse JSON with a library like Jackson or Gson
+        System.out.println(strJson);
+    }
+}
+```
+
+Notes:
+1. I've used Java 11's HttpClient which is the modern way to make HTTP requests in Java
+2. For JSON parsing, you would typically use a library like Jackson or Gson (not shown here)
+3. The URL encoding is done with URLEncoder
+4. Error handling is minimal in this example - you might want to add more robust error handling
+5. For async operations, you could use `client.sendAsync()` instead of `client.send()`
+
+If you need to parse the JSON response, you would typically create a POJO class that matches the response structure and use a JSON library to deserialize it.
